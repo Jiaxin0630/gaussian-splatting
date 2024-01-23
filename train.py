@@ -136,9 +136,18 @@ def prepare_output_and_logger(args):
         if os.getenv('OAR_JOB_ID'):
             unique_str=os.getenv('OAR_JOB_ID')
         else:
-            unique_str = str(uuid.uuid4())
-        args.model_path = os.path.join("./output/", unique_str[0:10])
-        
+            # nique_str = str(uuid.uuid4()) 
+            SceneName = args.source_path.split('\\')[-1]
+            if os.path.exists(os.path.join(args.source_path, "sparse")):
+                args.model_path = os.path.join("./output/", f"{SceneName}")
+                    
+            elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
+                args.model_path = os.path.join("./output/", f"{SceneName}")
+                    
+            elif os.path.exists(os.path.join(args.source_path, "trajectory_w2c.npy")) or \
+                os.path.exists(os.path.join(args.source_path, "trajectory.npy")):
+                args.model_path = os.path.join("./output/", f"{SceneName}")
+     
     # Set up output folder
     print("Output folder: {}".format(args.model_path))
     os.makedirs(args.model_path, exist_ok = True)
@@ -180,7 +189,10 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                     psnr_test += psnr(image, gt_image).mean().double()
                 psnr_test /= len(config['cameras'])
                 l1_test /= len(config['cameras'])          
-                print("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))
+                print("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))  
+                with open(f"{scene.model_path}/log.txt", 'a') as file:
+                    file.write("[ITER {}] Evaluating {}: L1 {} PSNR {}\n".format(iteration, config['name'], l1_test, psnr_test))
+    
                 if tb_writer:
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, iteration)
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, iteration)
@@ -200,8 +212,8 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[1_000, 7_000,1_0000,3_0000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[1_000, 7_000,1_0000,3_0000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)

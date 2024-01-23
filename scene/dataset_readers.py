@@ -8,7 +8,7 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-
+import open3d as o3d
 import os
 import sys
 from PIL import Image
@@ -66,7 +66,7 @@ def getNerfppNorm(cam_info):
     return {"translate": translate, "radius": radius}
 
 def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
-    cam_infos = []
+    cam_infos = [] 
     for idx, key in enumerate(cam_extrinsics):
         sys.stdout.write('\r')
         # the exact output you're looking for:
@@ -105,11 +105,20 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
     return cam_infos
 
 def fetchPly(path):
-    plydata = PlyData.read(path)
-    vertices = plydata['vertex']
-    positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
-    colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
-    normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    try:
+        plydata = PlyData.read(path)
+        vertices = plydata['vertex']
+        positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
+        colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
+        normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+        normals = None
+    except:
+        plydata = PlyData.read(path)
+        vertices = plydata['vertex']
+        positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
+        colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
+        normals = None
+     
     return BasicPointCloud(points=positions, colors=colors, normals=normals)
 
 def storePly(path, xyz, rgb):
@@ -175,6 +184,82 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
                            nerf_normalization=nerf_normalization,
                            ply_path=ply_path)
     return scene_info
+
+
+
+def readDroidSceneInfo(path, eval, llffhold=8):
+    
+    cam_extrinsics = np.load(os.path.join(path,"trajectory_w2c.npy"))
+    intrinsics_path = os.path.join(path,'camera.json')
+    
+    cam_infos_unsorted = readCamerasFromDroid(cam_extrinsics, intrinsics_path, images_folder=os.path.join(path, 'color'))
+    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+
+    if eval:
+        train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
+        test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
+    else:
+        train_cam_infos = cam_infos
+        test_cam_infos = []
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+    
+    ply_path = os.path.join(path, "pc_count3_abs1.0cm.ply") 
+    if not os.path.exists(ply_path):
+        ply_path = os.path.join(path, "pointscloud.ply")
+        if not os.path.exists(ply_path):
+            print("no ply file found!")
+    
+    try:
+        pcd = fetchPly(ply_path)
+    except:
+        pcd = None
+
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)
+    return scene_info
+
+
+
+
+def readCamerasFromDroid(cam_extrinsics, cam_intrinsics, images_folder):
+    cam_infos = []
+    with open(cam_intrinsics, 'r') as file:
+        cam_intrinsics = json.load(file)
+        
+    width = cam_intrinsics['images']['width']    
+    height = cam_intrinsics['images']['height']
+    
+    focal_length_x = cam_intrinsics['intrinsics'][0]
+    focal_length_y = cam_intrinsics['intrinsics'][1]
+    
+    image_path = sorted(os.listdir(images_folder))
+        
+    for i in range(len(image_path)):
+        extr = cam_extrinsics[i,:]
+
+        R = np.transpose(qvec2rotmat(extr[[6,3,4,5]]))
+        T = np.array(extr[:3])
+        
+        FovY = focal2fov(focal_length_y, height)
+        FovX = focal2fov(focal_length_x, width)
+
+        image_name = os.path.basename(image_path[i]).split(".")[0]
+        image = Image.open(os.path.join(images_folder,image_path[i]))
+
+        cam_info = CameraInfo(uid=1, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+                              image_path=os.path.join(images_folder,image_path[i]), image_name=image_name, width=width, height=height)
+        cam_infos.append(cam_info)
+        
+    return cam_infos    
+
+
+
+
+
 
 def readCamerasFromTransforms(path, transformsfile, white_background, extension=".png"):
     cam_infos = []
@@ -256,5 +341,6 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
 
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
-    "Blender" : readNerfSyntheticInfo
+    "Blender" : readNerfSyntheticInfo,
+    "Droid" : readDroidSceneInfo
 }
